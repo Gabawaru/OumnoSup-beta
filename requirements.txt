@@ -1,0 +1,16 @@
+# OumnoSup runtime dependencies.
+#
+# Scope note: this file currently covers steps 1-4 of the build (project
+# structure, configuration, database access, ORM models). Scrapy, Playwright,
+# BeautifulSoup, FastAPI, APScheduler, Redis and Loguru are added as their
+# implementation steps land, so that every pin here is actually exercised by
+# code in the repository.
+
+# Database
+SQLAlchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+greenlet==3.1.1          # required by SQLAlchemy's asyncio bridge
+
+# Configuration and validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
