@@ -1,0 +1,86 @@
+# Development stack: `docker compose up` and the API is on http://localhost:8000
+#
+# Postgres and Redis expose their ports on the host so you can inspect them with
+# psql or redis-cli while developing. docker-compose.prod.yml does not.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: oumnosup
+      POSTGRES_PASSWORD: oumnosup
+      POSTGRES_DB: oumnosup
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # The api service waits on this, so it never starts against a database
+      # that is still initialising.
+      test: ["CMD-SHELL", "pg_isready -U oumnosup -d oumnosup"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    # Migrations run here rather than in an entrypoint script so a failed
+    # migration stops the container loudly instead of serving a stale schema.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn src.api.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://oumnosup:oumnosup@postgres:5432/oumnosup
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: python -m src.scheduler.tasks
+    environment:
+      DATABASE_URL: postgresql+asyncpg://oumnosup:oumnosup@postgres:5432/oumnosup
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      # Waits for the api service, which owns the migrations: the scheduler must
+      # not query a schema that has not been created yet.
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,0 +1,51 @@
+# Production overlay:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences from the development stack:
+#   - Postgres and Redis are not published to the host; only the API is reachable.
+#   - Every secret and credential comes from the environment, with no default.
+#   - The API runs multiple workers.
+#
+# Required in the environment (or a .env file beside this one):
+#   POSTGRES_PASSWORD, SECRET_KEY, ADMIN_TOKEN, API_CORS_ORIGINS
+#
+# Settings refuses to start with ENVIRONMENT=production while SECRET_KEY or
+# ADMIN_TOKEN still hold their example values, so a misconfigured deploy fails
+# at boot rather than serving with known-public secrets.
+
+services:
+  postgres:
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oumnosup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-oumnosup}
+    ports: !override []
+
+  redis:
+    ports: !override []
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+
+  api:
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 4"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oumnosup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oumnosup}
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN must be set}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-["https://oumnosup.com"]}
+    restart: always
+
+  scheduler:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oumnosup}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oumnosup}
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN must be set}
+    restart: always
