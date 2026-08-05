@@ -325,12 +325,16 @@ class Program(TimestampMixin, Base):
 
     __tablename__ = "programs"
     __table_args__ = (
-        # The deduplication key from the pipeline spec, enforced by the database.
-        # ``name_local`` is used rather than ``name`` because the translated
-        # English name is derived and may change between runs. Its backing index
-        # also serves lookups by ``university_id`` alone, so that column carries
-        # no separate index.
-        UniqueConstraint("university_id", "name_local", "academic_year"),
+        # The natural key is (institution, source_key, year) — NOT the programme
+        # name. Names are not unique within an institution: Parcoursup publishes
+        # several distinct PASS programmes per university sharing one display
+        # name and differing only by their minor, each with its own capacity and
+        # applicant counts. Keying on the name silently merged 1404 of 14252
+        # records in a real run. See ``source_key`` below.
+        #
+        # Its backing index also serves lookups by ``university_id`` alone, so
+        # that column carries no separate index.
+        UniqueConstraint("university_id", "source_key", "academic_year"),
         Index("ix_programs_degree_level_field_of_study", "degree_level", "field_of_study"),
         Index("ix_programs_source_platform_academic_year", "source_platform", "academic_year"),
         CheckConstraint("capacity IS NULL OR capacity >= 0", name="capacity_non_negative"),
@@ -363,6 +367,20 @@ class Program(TimestampMixin, Base):
         ForeignKey("universities.id", ondelete="CASCADE"),
         nullable=False,
     )
+
+    #: The source platform's own identifier for this programme — Parcoursup's
+    #: ``cod_aff_form``, for instance. Null when the platform publishes none.
+    external_id: Mapped[str | None] = mapped_column(String(64))
+
+    #: What deduplication and upserts key on, never null.
+    #:
+    #: Holds ``external_id`` when the platform provides one and falls back to the
+    #: local name otherwise. The redundancy with ``external_id`` is deliberate:
+    #: a nullable column cannot carry a unique constraint usefully in PostgreSQL
+    #: (nulls compare distinct, so codeless rows would duplicate freely), and a
+    #: functional index over ``coalesce()`` would defeat both ``ON CONFLICT``
+    #: inference and reliable Alembic autogeneration.
+    source_key: Mapped[str] = mapped_column(String(500), nullable=False)
 
     #: Normalised English name, produced by the translator stage.
     name: Mapped[str] = mapped_column(String(500), nullable=False)

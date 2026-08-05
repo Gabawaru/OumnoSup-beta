@@ -160,6 +160,7 @@ class ProgramRead(_ReadModel):
 
     id: UUID
     university_id: UUID
+    external_id: str | None = None
     name: str
     name_local: str
     degree_level: DegreeLevel
@@ -345,6 +346,11 @@ class ScrapedProgram(_ScrapedModel):
     them is the normaliser's job, not the scraper's.
     """
 
+    #: The source platform's own identifier for this programme, when it publishes
+    #: one. Programme names are *not* unique within an institution, so this is
+    #: what deduplication keys on; see :attr:`source_key`.
+    external_id: str | None = Field(default=None, max_length=64)
+
     name: str = Field(min_length=1, max_length=500)
     name_local: str = Field(min_length=1, max_length=500)
     degree_level: DegreeLevel = DegreeLevel.OTHER
@@ -373,6 +379,16 @@ class ScrapedProgram(_ScrapedModel):
     #: The source record exactly as retrieved, stored for replay and drift
     #: diagnosis. Not validated: it is evidence, not data.
     raw_data: dict | None = None
+
+    @property
+    def source_key(self) -> str:
+        """The value deduplication and upserts key on.
+
+        Returns:
+            :attr:`external_id` when the platform published one, otherwise the
+            local name.
+        """
+        return self.external_id or self.name_local
 
     @field_validator("currency", mode="before")
     @classmethod

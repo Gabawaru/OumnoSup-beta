@@ -31,8 +31,8 @@ PLATFORM: Final[str] = "parcoursup"
 #: Columns the parser cannot work without. Absence signals the dataset changed
 #: shape, which :meth:`BaseScraper.check_structure` turns into a hard failure.
 PARCOURSUP_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
-    {"session", "cod_uai", "g_ea_lib_vx", "fili", "lib_for_voe_ins", "capa_fin", "voe_tot",
-     "acc_tot"}
+    {"session", "cod_uai", "cod_aff_form", "g_ea_lib_vx", "fili", "lib_for_voe_ins",
+     "capa_fin", "voe_tot", "acc_tot"}
 )
 
 #: ``fili`` values seen in the dataset, mapped to the project's degree levels and
@@ -239,6 +239,13 @@ def parse_record(record: dict[str, Any]) -> ScrapedProgram:
     ]
 
     return ScrapedProgram(
+        # ``cod_aff_form`` is Parcoursup's own programme identifier and is unique
+        # across the dataset (14214 distinct values over 14214 records that carry
+        # one). It is what makes a programme identifiable: a single university
+        # publishes several distinct PASS programmes under one display name,
+        # differing only by their minor, each with its own capacity and applicant
+        # counts. Keying on the name instead merged 1404 records in a real run.
+        external_id=str(record.get("cod_aff_form") or "").strip() or None,
         name=programme_name[:500],
         name_local=programme_name[:500],
         degree_level=degree_level,
