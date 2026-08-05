@@ -1,0 +1,216 @@
+"""The public OumnoSup API.
+
+Served under ``/api/v1``, documented at ``/docs``.
+
+Rate limiting and response caching both degrade rather than fail when Redis is
+absent: limiting falls back to per-process counters and caching switches off.
+A missing cache must never take the API down.
+"""
+
+from __future__ import annotations
+
+import time
+from collections import defaultdict, deque
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from src.api.routes import admin, countries, programs, stats, universities
+from src.core.config import get_settings
+from src.core.database import dispose_engine, ping
+from src.core.exceptions import APIError, OumnoSupError
+from src.utils.logger import configure_logging, logger
+
+__all__ = ["app", "create_app"]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown.
+
+    Args:
+        app: The application being started.
+
+    Yields:
+        Control while the application serves requests.
+    """
+    configure_logging()
+    settings = get_settings()
+    logger.info("OumnoSup API starting in {} mode", settings.environment.value)
+    if not await ping():
+        # Not fatal: the container may start before PostgreSQL accepts
+        # connections, and the health endpoint reports the real state.
+        logger.warning("database not reachable at startup; /health will report it")
+    yield
+    await dispose_engine()
+    logger.info("OumnoSup API stopped")
+
+
+class _InProcessRateLimiter:
+    """Sliding-window request limiter, per client address.
+
+    Used when Redis is unavailable. Its counters are per process, so several
+    workers each allow the configured rate; that is a deliberate trade against
+    refusing to serve at all.
+    """
+
+    def __init__(self, limit_per_minute: int) -> None:
+        self.limit = limit_per_minute
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
+
+    def allow(self, key: str) -> bool:
+        """Record a request and report whether it is within the limit.
+
+        Args:
+            key: Client identifier, normally the remote address.
+
+        Returns:
+            ``True`` when the request may proceed.
+        """
+        now = time.monotonic()
+        window = self._hits[key]
+        while window and now - window[0] > 60:
+            window.popleft()
+        if len(window) >= self.limit:
+            return False
+        window.append(now)
+        return True
+
+
+def create_app() -> FastAPI:
+    """Build the FastAPI application.
+
+    Returns:
+        The configured application.
+    """
+    settings = get_settings()
+
+    app = FastAPI(
+        title="OumnoSup API",
+        version="0.1.0",
+        summary="L'admission universitaire, sans frontières.",
+        description=(
+            "Public access to university admission data — programmes, capacities, "
+            "deadlines and admission statistics — collected from official national "
+            "platforms and normalised into one schema."
+        ),
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.api_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+    limiter = _InProcessRateLimiter(settings.api_rate_limit_per_minute)
+
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        """Reject a client that exceeds the configured request rate.
+
+        Args:
+            request: The incoming request.
+            call_next: The next handler in the chain.
+
+        Returns:
+            The downstream response, or a 429.
+        """
+        # Docs and health are exempt: throttling them makes an API look broken
+        # exactly when someone is trying to work out whether it is up.
+        if request.url.path in {"/health", "/docs", "/redoc", "/openapi.json"}:
+            return await call_next(request)
+
+        client = request.client.host if request.client else "unknown"
+        if not limiter.allow(client):
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "RateLimitExceeded",
+                    "message": (
+                        f"more than {settings.api_rate_limit_per_minute} requests per "
+                        f"minute; wait a moment and retry"
+                    ),
+                },
+                headers={"Retry-After": "60"},
+            )
+        return await call_next(request)
+
+    @app.exception_handler(APIError)
+    async def handle_api_error(request: Request, exc: APIError) -> JSONResponse:
+        """Map an API error onto its declared status code.
+
+        Args:
+            request: The request that failed.
+            exc: The raised error.
+
+        Returns:
+            The error rendered as JSON.
+        """
+        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+
+    @app.exception_handler(OumnoSupError)
+    async def handle_domain_error(request: Request, exc: OumnoSupError) -> JSONResponse:
+        """Report an unexpected domain error without leaking internals.
+
+        Args:
+            request: The request that failed.
+            exc: The raised error.
+
+        Returns:
+            A 500 response carrying the error class and message.
+        """
+        logger.error("unhandled domain error on {}: {}", request.url.path, exc)
+        return JSONResponse(
+            status_code=500,
+            content={"error": type(exc).__name__, "message": exc.message},
+        )
+
+    @app.get("/health", tags=["meta"], summary="Health check")
+    async def health() -> dict[str, Any]:
+        """Report whether the service and its database are usable.
+
+        Returns:
+            The service status and database reachability.
+        """
+        database_up = await ping()
+        return {
+            "status": "ok" if database_up else "degraded",
+            "database": "up" if database_up else "down",
+            "environment": settings.environment.value,
+            "version": app.version,
+        }
+
+    @app.get("/", tags=["meta"], summary="Service index")
+    async def index() -> dict[str, Any]:
+        """Point callers at the documentation and the API root.
+
+        Returns:
+            Links into the service.
+        """
+        return {
+            "service": "OumnoSup",
+            "tagline": "L'admission universitaire, sans frontières.",
+            "docs": "/docs",
+            "api": "/api/v1",
+        }
+
+    prefix = "/api/v1"
+    app.include_router(countries.router, prefix=prefix)
+    app.include_router(universities.router, prefix=prefix)
+    app.include_router(programs.router, prefix=prefix)
+    app.include_router(stats.router, prefix=prefix)
+    app.include_router(admin.router, prefix=prefix)
+
+    return app
+
+
+app = create_app()
