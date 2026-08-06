@@ -56,12 +56,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # Healthcheck comes from the image (HEALTHCHECK in the Dockerfile), which
+    # uses Python rather than curl so the image needs no apt packages.
     restart: unless-stopped
 
   scheduler:

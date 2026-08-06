@@ -50,6 +50,15 @@ uvicorn src.api.main:app --reload
 Redis is optional. Without it the rate limiter falls back to per-process
 counters and the response cache switches off; nothing breaks.
 
+### Response caching
+
+`GET` requests under `/api/v1` are cached in Redis for `API_CACHE_TTL_SECONDS`
+(300 by default). Responses carry `X-Cache: HIT` or `MISS`, and the header is
+omitted entirely when Redis is unreachable — so it never claims a cache that
+does not exist. Admin routes are never cached: they are authenticated and report
+live run state. The cache is dropped automatically after every scrape, since the
+data it describes has just changed.
+
 ---
 
 ## Using the API

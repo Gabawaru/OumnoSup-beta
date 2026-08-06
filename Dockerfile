@@ -3,21 +3,20 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Build tooling for asyncpg's C extension, plus curl for the compose healthcheck.
-# Removed in the same layer so it never reaches the final image.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential curl \
- && rm -rf /var/lib/apt/lists/*
+# No apt layer at all. Every pinned dependency publishes a manylinux wheel for
+# CPython 3.11 -- asyncpg included -- so no compiler is needed, and the
+# healthcheck below uses the Python already in the image rather than curl.
+# Skipping apt keeps the image small, the build fast, and the CVE surface low.
 
 # Dependencies first: this layer is cached until requirements.txt itself changes,
 # so ordinary code edits do not trigger a reinstall.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
- && apt-get purge -y --auto-remove build-essential
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
@@ -31,5 +30,8 @@ RUN useradd --create-home --uid 1000 oumno \
 USER oumno
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status==200 else 1)"
 
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

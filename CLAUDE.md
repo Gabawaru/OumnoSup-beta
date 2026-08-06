@@ -100,6 +100,20 @@ Otherwise PostgreSQL stores member *names* (`BACHELOR`) instead of *values*
 (`bachelor`), and every API filter comparing against the lower-case value
 silently matches nothing.
 
+### The image needs no apt layer
+
+Every pinned dependency publishes a manylinux wheel for CPython 3.11, asyncpg
+included, so no compiler is required. The healthcheck uses the interpreter
+already in the image instead of curl. Dropping `apt-get` entirely makes the
+build faster, the image smaller and the CVE surface lower — do not add it back
+without a dependency that genuinely needs it.
+
+### A fire-and-forget task needs a strong reference
+
+`POST /admin/scrape/{platform}` schedules work with `asyncio.create_task`. The
+event loop holds only a weak reference, so without `_RUNNING_SCRAPES` the task
+can be garbage-collected mid-run and the scrape stops silently partway through.
+
 ## Conventions
 
 - Type hints on all public functions; Google-style docstrings.
@@ -109,6 +123,10 @@ silently matches nothing.
 - Money is `Numeric`, never `Float`.
 - Tests run against real PostgreSQL, never SQLite — the schema needs native
   enums, `ARRAY`, `JSONB` and `ON CONFLICT`.
+- `ruff check src tests && mypy src` must stay clean. `RUF001`/`RUF002` are
+  disabled on purpose: source platforms publish en dashes and narrow no-break
+  spaces, and the i18n catalogue carries CJK punctuation. Rewriting those to
+  ASCII look-alikes would break parsing.
 
 ## Verification that matters
 
@@ -121,6 +139,6 @@ from `records_inserted`. That is the only real proof the natural keys work.
 - Admin dashboard (only the JSON admin routes exist).
 - 23 country scrapers.
 - `oumno_users` / `oumno_applications` are tables only; no auth, no flows.
-- Redis response caching is designed for but not wired into the API routes.
-- Nobody has run `docker compose up` end to end — it was written and validated
-  with `docker compose config`, but this environment had no Docker daemon.
+- `Ecole de Commerce` maps to `degree_level = other`: Parcoursup lists both
+  three-year bachelors and five-year integrated programmes with nothing to tell
+  them apart. One line in `_FILIERE_MAP` if a business rule ever settles it.
