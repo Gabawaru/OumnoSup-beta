@@ -1,0 +1,33 @@
+# OumnoSup runtime dependencies.
+#
+# Every pin here is exercised by code in the repository.
+
+# Database
+SQLAlchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+greenlet==3.1.1          # required by SQLAlchemy's asyncio bridge
+alembic==1.14.0
+
+# Configuration and validation
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# API
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Scheduling
+APScheduler==3.11.0
+
+# HTTP and logging
+httpx==0.28.1
+loguru==0.7.3
+
+# Optional at runtime: the rate limiter and response cache fall back to
+# in-process behaviour when Redis is unreachable, so a local run needs no server.
+redis==8.1.0
+
+# Optional at runtime: only JSRenderMixin imports Playwright, and it does so
+# lazily. Scrapers backed by JSON APIs -- Parcoursup included -- never load it.
+# Install with `pip install playwright && playwright install chromium`.
+# playwright==1.49.0

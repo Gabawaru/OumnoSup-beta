@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",  # FastAPI dependencies are function calls in argument defaults by design
+    "N818",  # exception names read better without a forced "Error" suffix everywhere
+    # This project deliberately handles real-world Unicode. Source platforms
+    # publish en dashes in academic years ("2025–26") and narrow no-break spaces
+    # in numbers, and the i18n catalogue carries CJK punctuation. Rewriting those
+    # to ASCII look-alikes would break parsing and mistranslate the catalogue.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*" = ["E501"]  # generated migrations carry long DDL lines
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+ignore_missing_imports = true
+plugins = []
