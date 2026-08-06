@@ -204,6 +204,49 @@ ruff check src tests && mypy src
 
 ## Deployment
 
+### Render (one file, everything provisioned)
+
+`render.yaml` declares the database, the key-value store, the API and the
+scheduler. In the Render dashboard: **New → Blueprint →** pick this repository.
+Render creates all four and wires the connection strings between them.
+
+No credential is in the file. `DATABASE_URL` and `REDIS_URL` come from the
+managed services; `SECRET_KEY` and `ADMIN_TOKEN` are generated on first deploy —
+read `ADMIN_TOKEN` from the dashboard afterwards, it protects
+`POST /api/v1/admin/scrape`.
+
+Then load the data once:
+
+```bash
+curl -X POST -H "X-Admin-Token: <from dashboard>" \
+  https://<your-app>.onrender.com/api/v1/admin/scrape/parcoursup
+```
+
+The worker has no free plan on Render. Drop the `oumnosup-scheduler` service
+from `render.yaml` to stay free and trigger refreshes with the admin endpoint
+instead.
+
+### Railway
+
+Railway reads `railway.json` and the `Dockerfile`. Add a PostgreSQL and a Redis
+plugin to the project, then reference them:
+
+```
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+REDIS_URL=${{Redis.REDIS_URL}}
+ENVIRONMENT=production
+SECRET_KEY=<generate one>
+ADMIN_TOKEN=<generate one>
+```
+
+### Any host
+
+The image honours `PORT` (default 8000) and accepts a plain `postgresql://` or
+`postgres://` URL — the scheme is rewritten onto the async driver — so the
+connection strings managed providers hand out work unchanged.
+
+### Your own server
+
 ```bash
 export POSTGRES_PASSWORD=... SECRET_KEY=... ADMIN_TOKEN=...
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d

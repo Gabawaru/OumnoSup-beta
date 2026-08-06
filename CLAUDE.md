@@ -108,6 +108,21 @@ already in the image instead of curl. Dropping `apt-get` entirely makes the
 build faster, the image smaller and the CVE surface lower — do not add it back
 without a dependency that genuinely needs it.
 
+### `DATABASE_URL` is normalised, not rejected
+
+Every managed PostgreSQL provider — Render, Railway, Neon, Supabase, Heroku —
+hands out `postgresql://` or `postgres://`. The config validator used to reject
+anything but `postgresql+asyncpg://`, which meant the application could not boot
+on any of them. It now rewrites the bare schemes onto the async driver and still
+refuses genuinely wrong ones. Do not tighten this back.
+
+### The image honours `PORT`
+
+Managed hosts assign a port and expect the process to bind there. `CMD` uses
+shell form so `$PORT` expands, with a leading `exec` so uvicorn becomes PID 1
+and receives `SIGTERM` — without it container stops are kills, not shutdowns.
+The healthcheck reads the same variable so the two cannot disagree.
+
 ### A fire-and-forget task needs a strong reference
 
 `POST /admin/scrape/{platform}` schedules work with `asyncio.create_task`. The

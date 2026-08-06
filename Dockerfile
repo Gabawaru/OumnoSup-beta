@@ -31,7 +31,15 @@ USER oumno
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status==200 else 1)"
+# PORT is honoured because managed hosts (Render, Railway, Fly, Heroku) assign it
+# and expect the process to bind there; 8000 is the local default. Both the
+# healthcheck and the command read it, so they can never disagree about the port.
+ENV PORT=8000
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
+  CMD python -c "import os,sys,urllib.request; sys.exit(0 if urllib.request.urlopen(f\"http://localhost:{os.environ.get('PORT','8000')}/health\", timeout=4).status==200 else 1)"
+
+# Shell form on purpose: exec form cannot expand $PORT. The leading `exec`
+# replaces the shell with uvicorn so it becomes PID 1 and receives SIGTERM
+# directly -- without it the container would be killed rather than shut down.
+CMD exec uvicorn src.api.main:app --host 0.0.0.0 --port "${PORT:-8000}"

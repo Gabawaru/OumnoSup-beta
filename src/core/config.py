@@ -166,23 +166,35 @@ class Settings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def _validate_async_database_url(cls, value: str) -> str:
-        """Ensure the database URL targets the async driver.
+        """Normalise the database URL onto the async driver.
+
+        Every managed PostgreSQL provider — Render, Railway, Neon, Supabase,
+        Heroku — hands out a ``postgres://`` or ``postgresql://`` URL. Rejecting
+        those would make the application fail to boot on all of them, so the
+        bare PostgreSQL schemes are rewritten onto ``postgresql+asyncpg``
+        instead. Any other driver is still refused, because a synchronous or
+        non-PostgreSQL URL fails later inside ``create_async_engine`` with a far
+        less useful error.
 
         Args:
             value: Raw database URL read from the environment.
 
         Returns:
-            The unchanged URL.
+            The URL, rewritten onto the async driver when necessary.
 
         Raises:
-            ValueError: If the URL does not use the ``postgresql+asyncpg`` scheme.
+            ValueError: If the URL names a driver this application cannot use.
         """
-        if not value.startswith(_ASYNC_DB_SCHEME):
-            raise ValueError(
-                f"DATABASE_URL must start with {_ASYNC_DB_SCHEME!r} because the "
-                f"application uses SQLAlchemy's asyncio engine (got {value!r})"
-            )
-        return value
+        url = value.strip()
+        if url.startswith(_ASYNC_DB_SCHEME):
+            return url
+        for bare in ("postgresql://", "postgres://"):
+            if url.startswith(bare):
+                return _ASYNC_DB_SCHEME + url[len(bare):]
+        raise ValueError(
+            f"DATABASE_URL must be a PostgreSQL URL — {_ASYNC_DB_SCHEME!r}, "
+            f"'postgresql://' or 'postgres://' (got {value!r})"
+        )
 
     @field_validator("api_max_page_size")
     @classmethod
