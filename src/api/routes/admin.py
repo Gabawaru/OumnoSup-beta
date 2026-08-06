@@ -24,6 +24,10 @@ _AVAILABLE_PLATFORMS: dict[str, tuple[str, str]] = {
     "parcoursup": ("src.scrapers.france.parcoursup", "ParcoursupScraper"),
 }
 
+#: Strong references to in-flight scrape tasks, so the garbage collector cannot
+#: reclaim one while it runs. The event loop alone holds only a weak reference.
+_RUNNING_SCRAPES: set[asyncio.Task[None]] = set()
+
 
 @router.get("/scrape-runs", response_model=Page[ScrapeRunRead], summary="List scrape runs")
 async def list_scrape_runs(
@@ -90,6 +94,7 @@ async def trigger_scrape(platform: str, limit: int | None = None) -> dict[str, A
         """Execute the pipeline for the requested platform."""
         import importlib
 
+        from src.api.cache import get_cache
         from src.pipeline.runner import run_pipeline
 
         scraper_cls = getattr(importlib.import_module(module_path), class_name)
@@ -97,8 +102,17 @@ async def trigger_scrape(platform: str, limit: int | None = None) -> dict[str, A
             await run_pipeline(scraper_cls(persist_run=True, limit=limit))
         except Exception as exc:
             logger.error("triggered scrape of {} failed: {}", platform, exc)
+            return
+        # Stored data has changed, so every cached page of it is now suspect.
+        await get_cache().invalidate()
 
-    asyncio.create_task(_run())
+    # Hold a strong reference until the task finishes. The event loop keeps only
+    # a weak one, so a fire-and-forget task can be garbage-collected mid-run --
+    # which for a scrape means it silently stops partway through.
+    task = asyncio.create_task(_run())
+    _RUNNING_SCRAPES.add(task)
+    task.add_done_callback(_RUNNING_SCRAPES.discard)
+
     return {
         "status": "accepted",
         "platform": platform,

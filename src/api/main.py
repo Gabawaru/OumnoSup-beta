@@ -3,8 +3,12 @@
 Served under ``/api/v1``, documented at ``/docs``.
 
 Rate limiting and response caching both degrade rather than fail when Redis is
-absent: limiting falls back to per-process counters and caching switches off.
-A missing cache must never take the API down.
+absent: limiting falls back to per-process counters and caching switches off
+after one failed connection attempt. A missing cache must never take the API
+down.
+
+Cached responses carry an ``X-Cache`` header of ``HIT`` or ``MISS``, so a client
+— or a bug report — can tell where an answer came from.
 """
 
 from __future__ import annotations
@@ -14,10 +18,11 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.api.cache import get_cache
 from src.api.routes import admin, countries, programs, stats, universities
 from src.core.config import get_settings
 from src.core.database import dispose_engine, ping
@@ -45,6 +50,7 @@ async def lifespan(app: FastAPI):
         # connections, and the health endpoint reports the real state.
         logger.warning("database not reachable at startup; /health will report it")
     yield
+    await get_cache().close()
     await dispose_engine()
     logger.info("OumnoSup API stopped")
 
@@ -143,6 +149,52 @@ def create_app() -> FastAPI:
                 headers={"Retry-After": "60"},
             )
         return await call_next(request)
+
+    cache = get_cache()
+
+    @app.middleware("http")
+    async def cache_responses(request: Request, call_next):
+        """Serve repeated GET requests from Redis.
+
+        Only successful GETs under ``/api/v1`` are cached, and never the admin
+        routes: those are authenticated and report live run state, so a stale
+        answer there would be actively misleading.
+
+        Args:
+            request: The incoming request.
+            call_next: The next handler in the chain.
+
+        Returns:
+            The cached body when one is warm, otherwise the fresh response.
+        """
+        if (
+            not cache.enabled
+            or request.method != "GET"
+            or not request.url.path.startswith("/api/v1")
+            or "/admin" in request.url.path
+        ):
+            return await call_next(request)
+
+        key = cache.key_for(request.url.path, request.url.query)
+        if (hit := await cache.get(key)) is not None:
+            return JSONResponse(content=hit, headers={"X-Cache": "HIT"})
+
+        response = await call_next(request)
+        if response.status_code == 200:
+            # Read the streamed body so it can be stored, then hand back an
+            # equivalent response: the original iterator is consumed by now.
+            body = b"".join([chunk async for chunk in response.body_iterator])
+            await cache.set(key, body)
+            # Only claim a miss when a cache actually exists to have missed.
+            # Advertising MISS with Redis down would misreport the deployment.
+            headers = {"X-Cache": "MISS"} if cache.active else None
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                media_type=response.media_type,
+                headers=headers,
+            )
+        return response
 
     @app.exception_handler(APIError)
     async def handle_api_error(request: Request, exc: APIError) -> JSONResponse:

@@ -72,6 +72,13 @@ async def refresh_platform(platform: str) -> None:
         platform, result.stored.programs_inserted, result.stored.programs_updated,
     )
 
+    # Clear the API's cached responses. The scheduler is a separate process, but
+    # the cache lives in Redis, so dropping the keys here is what makes the API
+    # serve the data this run just wrote.
+    from src.api.cache import get_cache
+
+    await get_cache().invalidate()
+
 
 async def _enabled_countries() -> list[tuple[str, str | None, ScrapingFrequency]]:
     """Read the countries whose scraping is switched on.
