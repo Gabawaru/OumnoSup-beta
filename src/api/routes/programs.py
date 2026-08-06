@@ -83,9 +83,24 @@ async def list_programs(
     if q:
         stmt = stmt.where(Program.name.ilike(f"%{q}%") | Program.name_local.ilike(f"%{q}%"))
     if min_acceptance_rate is not None:
-        stmt = stmt.join(
-            AdmissionStatistic, AdmissionStatistic.program_id == Program.id
-        ).where(AdmissionStatistic.acceptance_rate >= min_acceptance_rate)
+        # EXISTS, not a join. Joining admission_statistics multiplies a programme
+        # by its number of published years, which inflates `total` and repeats
+        # the same programme across pages -- invisible today because each
+        # programme has one year, and guaranteed to appear the moment a second
+        # session is scraped.
+        #
+        # The correlation is on the programme's own academic year, so the filter
+        # judges a programme by its current intake rather than matching one that
+        # happened to be easy to enter several years ago.
+        stmt = stmt.where(
+            select(AdmissionStatistic.id)
+            .where(
+                AdmissionStatistic.program_id == Program.id,
+                AdmissionStatistic.academic_year == Program.academic_year,
+                AdmissionStatistic.acceptance_rate >= min_acceptance_rate,
+            )
+            .exists()
+        )
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = (

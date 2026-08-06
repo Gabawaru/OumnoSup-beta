@@ -123,6 +123,23 @@ shell form so `$PORT` expands, with a leading `exec` so uvicorn becomes PID 1
 and receives `SIGTERM` — without it container stops are kills, not shutdowns.
 The healthcheck reads the same variable so the two cannot disagree.
 
+### Never join `admission_statistics` to filter programmes
+
+A programme has one statistics row per published year. Joining the table to
+filter on `acceptance_rate` multiplies the programme by its number of years,
+which inflates `total` and repeats it across pages. Use an `EXISTS` correlated
+on `Program.academic_year`, which also judges a programme by its current intake
+rather than a year when it happened to be easy to enter. This was invisible
+while every programme had a single year and would have surfaced on the first
+2026 scrape.
+
+### The in-process rate limiter is bounded, and deliberately imprecise
+
+It evicts expired windows first, then the least-recently-seen live ones once
+past 10,000 addresses. An evicted address gets a fresh allowance — that
+inaccuracy is the price of a table that cannot grow until the process dies. Use
+Redis when exact limiting across a large client population matters.
+
 ### A fire-and-forget task needs a strong reference
 
 `POST /admin/scrape/{platform}` schedules work with `asyncio.create_task`. The

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
 from src.api.dependencies import PaginationDep, SessionDep, require_admin
-from src.core.exceptions import ResourceNotFoundError
+from src.core.exceptions import ResourceNotFoundError, ScrapeAlreadyRunningError
 from src.core.models import ScrapeRun
 from src.core.schemas import Page, ScrapeRunRead
 from src.utils.logger import logger
@@ -27,6 +27,10 @@ _AVAILABLE_PLATFORMS: dict[str, tuple[str, str]] = {
 #: Strong references to in-flight scrape tasks, so the garbage collector cannot
 #: reclaim one while it runs. The event loop alone holds only a weak reference.
 _RUNNING_SCRAPES: set[asyncio.Task[None]] = set()
+
+#: Platform slugs with a run in flight in this process, used to reject a
+#: concurrent trigger for the same platform.
+_IN_FLIGHT: set[str] = set()
 
 
 @router.get("/scrape-runs", response_model=Page[ScrapeRunRead], summary="List scrape runs")
@@ -88,6 +92,12 @@ async def trigger_scrape(platform: str, limit: int | None = None) -> dict[str, A
     if entry is None:
         raise ResourceNotFoundError("scraper", platform)
 
+    # Refuse a second run of the same platform while one is in flight. Two
+    # concurrent runs would upsert the same rows against each other, double the
+    # load on the source, and produce two audit rows describing one refresh.
+    if platform in _IN_FLIGHT:
+        raise ScrapeAlreadyRunningError(platform)
+
     module_path, class_name = entry
 
     async def _run() -> None:
@@ -103,8 +113,12 @@ async def trigger_scrape(platform: str, limit: int | None = None) -> dict[str, A
         except Exception as exc:
             logger.error("triggered scrape of {} failed: {}", platform, exc)
             return
+        finally:
+            _IN_FLIGHT.discard(platform)
         # Stored data has changed, so every cached page of it is now suspect.
         await get_cache().invalidate()
+
+    _IN_FLIGHT.add(platform)
 
     # Hold a strong reference until the task finishes. The event loop keeps only
     # a weak one, so a fire-and-forget task can be garbage-collected mid-run --

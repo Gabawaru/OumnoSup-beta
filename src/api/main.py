@@ -14,9 +14,9 @@ Cached responses carry an ``X-Cache`` header of ``HIT`` or ``MISS``, so a client
 from __future__ import annotations
 
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Final
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,11 +61,38 @@ class _InProcessRateLimiter:
     Used when Redis is unavailable. Its counters are per process, so several
     workers each allow the configured rate; that is a deliberate trade against
     refusing to serve at all.
+
+    Entries are swept once the table grows past :data:`_SWEEP_THRESHOLD`. Without
+    that, every address ever seen is remembered forever — a public API meets
+    scanners and one-off clients constantly, so the table would grow without
+    bound until the process runs out of memory.
     """
+
+    #: Hard ceiling on tracked addresses.
+    _MAX_TRACKED: Final[int] = 10_000
 
     def __init__(self, limit_per_minute: int) -> None:
         self.limit = limit_per_minute
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        # Ordered by least-recently-touched, so eviction is a cheap popitem.
+        self._hits: OrderedDict[str, deque[float]] = OrderedDict()
+
+    def _evict(self, now: float) -> None:
+        """Bound the table, dropping expired entries before live ones.
+
+        Expired windows go first, which is enough in normal traffic. If a burst
+        of distinct addresses keeps the table over the ceiling anyway, the
+        least-recently-seen live entries are dropped too. That costs accuracy —
+        an evicted address gets a fresh allowance — and is the right trade: an
+        unbounded table eventually takes the process down, and Redis is the
+        answer when exact limiting across a large client population matters.
+
+        Args:
+            now: Current monotonic time.
+        """
+        for key in [k for k, hits in self._hits.items() if not hits or now - hits[-1] > 60]:
+            del self._hits[key]
+        while len(self._hits) > self._MAX_TRACKED:
+            self._hits.popitem(last=False)
 
     def allow(self, key: str) -> bool:
         """Record a request and report whether it is within the limit.
@@ -77,7 +104,15 @@ class _InProcessRateLimiter:
             ``True`` when the request may proceed.
         """
         now = time.monotonic()
-        window = self._hits[key]
+        if len(self._hits) > self._MAX_TRACKED:
+            self._evict(now)
+
+        window = self._hits.get(key)
+        if window is None:
+            window = self._hits[key] = deque()
+        else:
+            self._hits.move_to_end(key)
+
         while window and now - window[0] > 60:
             window.popleft()
         if len(window) >= self.limit:

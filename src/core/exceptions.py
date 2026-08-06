@@ -320,6 +320,27 @@ class AuthenticationError(APIError):
     status_code = 401
 
 
+class ScrapeAlreadyRunningError(APIError):
+    """Raised when a scrape is triggered for a platform already being scraped.
+
+    409 rather than 429: the request is not rate limited, it conflicts with
+    work already in progress.
+
+    Args:
+        platform: The platform slug with a run in flight.
+    """
+
+    status_code = 409
+
+    def __init__(self, platform: str) -> None:
+        super().__init__(
+            f"a scrape of {platform} is already running; follow it at "
+            f"/api/v1/admin/scrape-runs",
+            platform=platform,
+        )
+        self.platform = platform
+
+
 __all__ = [
     "APIError",
     "AuthenticationError",
@@ -334,6 +355,7 @@ __all__ = [
     "RecordValidationError",
     "ResourceNotFoundError",
     "RobotsDisallowedError",
+    "ScrapeAlreadyRunningError",
     "ScrapeHTTPError",
     "ScrapeTimeoutError",
     "ScraperError",
