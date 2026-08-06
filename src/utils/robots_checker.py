@@ -173,10 +173,11 @@ class RobotsPolicy:
         decision: bool | None = None
         best_len = -1
         for allow, pattern in group.rules:
-            if _path_to_regex(pattern).match(path):
-                # Wildcards make the literal length a poor proxy for specificity,
-                # so compare on the pattern length as the RFC prescribes.
-                if len(pattern) > best_len or (len(pattern) == best_len and allow):
+            # Wildcards make the literal length a poor proxy for specificity, so
+            # compare on the pattern length as the RFC prescribes.
+            if _path_to_regex(pattern).match(path) and (
+                len(pattern) > best_len or (len(pattern) == best_len and allow)
+            ):
                     decision, best_len = allow, len(pattern)
         return True if decision is None else decision
 

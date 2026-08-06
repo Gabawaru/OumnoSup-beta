@@ -177,7 +177,7 @@ def deduplicate(
             grouped[
                 match_key(program.university.external_id or program.university.name)
             ].append(program)
-        for institution, group in grouped.items():
+        for group in grouped.values():
             if len(group) < 2:
                 continue
             for i in range(len(group)):

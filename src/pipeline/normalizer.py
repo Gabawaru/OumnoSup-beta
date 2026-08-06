@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
 
@@ -195,8 +195,8 @@ def to_utc(value: datetime) -> datetime:
         The equivalent moment in UTC.
     """
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def normalize_score(raw: str | None) -> tuple[Decimal, Decimal] | None:

@@ -32,10 +32,8 @@ from pydantic import (
 )
 
 from src.core.models import (
-    ApplicationStatus,
     CriterionType,
     DegreeLevel,
-    EducationLevel,
     ScrapeStatus,
     ScrapingFrequency,
     UniversityType,

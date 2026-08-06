@@ -17,7 +17,7 @@ from loguru import logger
 
 from src.core.config import get_settings
 
-__all__ = ["configure_logging", "logger", "log_request"]
+__all__ = ["configure_logging", "log_request", "logger"]
 
 _HUMAN_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "

@@ -16,10 +16,11 @@ duplicating. That property is what makes a scheduled refresh safe to run daily.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID, uuid4
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -161,7 +162,7 @@ async def _upsert_universities(
                 "city": stmt.excluded.city,
                 "region": stmt.excluded.region,
                 "type": stmt.excluded.type,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             },
         )
         await session.execute(stmt)
@@ -211,16 +212,13 @@ async def store_programs(
 
     # Which natural keys already exist? Needed to report inserted vs updated
     # honestly — ON CONFLICT alone cannot tell the two apart in a batch.
-    existing = {
-        (uid, key, year)
-        for uid, key, year in (
-            await session.execute(
-                select(Program.university_id, Program.source_key, Program.academic_year).where(
-                    Program.source_platform == programs[0].source_platform
-                )
+    existing = set(
+        await session.execute(
+            select(Program.university_id, Program.source_key, Program.academic_year).where(
+                Program.source_platform == programs[0].source_platform
             )
         )
-    }
+    )
 
     program_rows: list[dict[str, Any]] = []
     for program in programs:
@@ -282,7 +280,7 @@ async def store_programs(
                 "duration_years": stmt.excluded.duration_years,
                 "source_url": stmt.excluded.source_url,
                 "raw_data": stmt.excluded.raw_data,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             },
         )
         await session.execute(stmt)
@@ -338,7 +336,7 @@ async def store_programs(
                 "applicants_count": stmt.excluded.applicants_count,
                 "admitted_count": stmt.excluded.admitted_count,
                 "acceptance_rate": stmt.excluded.acceptance_rate,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             },
         )
         await session.execute(stmt)
@@ -350,9 +348,7 @@ async def store_programs(
         touched = {row["program_id"] for row in crit_rows}
         for batch in _chunks(sorted(touched, key=str)):
             await session.execute(
-                AdmissionCriterion.__table__.delete().where(
-                    AdmissionCriterion.program_id.in_(batch)
-                )
+                sa_delete(AdmissionCriterion).where(AdmissionCriterion.program_id.in_(batch))
             )
         for batch in _chunks(crit_rows):
             await session.execute(pg_insert(AdmissionCriterion).values(batch))

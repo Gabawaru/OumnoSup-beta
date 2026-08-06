@@ -18,7 +18,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, ClassVar
 from uuid import UUID
@@ -336,7 +336,7 @@ class BaseScraper(ABC):
             run = ScrapeRun(
                 platform=self.platform,
                 country_code=self.country_code,
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
                 status=ScrapeStatus.RUNNING,
             )
             session.add(run)
@@ -357,7 +357,7 @@ class BaseScraper(ABC):
             if run is None:
                 self.log.error("scrape_runs row {} vanished before finalisation", run_id)
                 return
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             run.status = result.status
             run.records_scraped = result.scraped
             run.records_failed = result.failed

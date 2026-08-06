@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -72,10 +72,10 @@ class TestMatchKey:
 class TestMisc:
     def test_naive_datetime_is_assumed_utc(self) -> None:
         """Guessing a local zone would shift scraped dates by up to a day."""
-        assert to_utc(datetime(2025, 1, 1, 12)).tzinfo is timezone.utc
+        assert to_utc(datetime(2025, 1, 1, 12)).tzinfo is UTC
 
     def test_aware_datetime_is_converted(self) -> None:
-        assert to_utc(datetime(2025, 1, 1, 12, tzinfo=timezone.utc)).hour == 12
+        assert to_utc(datetime(2025, 1, 1, 12, tzinfo=UTC)).hour == 12
 
     def test_score_keeps_its_scale(self) -> None:
         assert normalize_score("14/20") == (Decimal("14"), Decimal("20"))

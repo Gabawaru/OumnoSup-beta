@@ -10,7 +10,9 @@ enforceable rather than aspirational.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from sqlalchemy import select
 
 from src.core.database import session_scope
 from src.core.models import Country, ScrapeRun, ScrapeStatus
@@ -26,7 +28,6 @@ from src.pipeline.translator import Translator, build_translator
 from src.pipeline.validator import validate_many
 from src.scrapers.base import BaseScraper
 from src.utils.logger import logger
-from sqlalchemy import select
 
 __all__ = ["PipelineResult", "process_items", "run_pipeline"]
 
@@ -173,7 +174,7 @@ async def run_pipeline(
             )
         ).scalar_one_or_none()
         if country is not None:
-            country.last_scrape_at = datetime.now(timezone.utc)
+            country.last_scrape_at = datetime.now(UTC)
 
     logger.info(
         "pipeline complete: {} scraped, {} stored ({} new, {} updated), {} rejected",

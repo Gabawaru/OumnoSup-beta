@@ -45,8 +45,12 @@ class RateLimiter(ABC):
             The number of seconds spent waiting.
         """
 
-    async def close(self) -> None:
-        """Release any resources held by the limiter."""
+    async def close(self) -> None:  # noqa: B027 - optional hook, not abstract
+        """Release any resources held by the limiter.
+
+        A no-op by default: an in-memory limiter holds nothing to release, and
+        forcing every implementation to define one would be noise.
+        """
 
 
 class InMemoryRateLimiter(RateLimiter):

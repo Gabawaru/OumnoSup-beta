@@ -44,7 +44,7 @@ def _jsonable(value: Any) -> Any:
     """
     if isinstance(value, Decimal):
         return float(value)
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
@@ -75,7 +75,11 @@ def _flatten(program: ScrapedProgram) -> dict[str, Any]:
         "capacity": program.capacity if program.capacity is not None else "",
         "applicants": stat.applicants_count if stat and stat.applicants_count is not None else "",
         "admitted": stat.admitted_count if stat and stat.admitted_count is not None else "",
-        "acceptance_rate": str(stat.acceptance_rate) if stat and stat.acceptance_rate is not None else "",
+        "acceptance_rate": (
+            str(stat.acceptance_rate)
+            if stat and stat.acceptance_rate is not None
+            else ""
+        ),
         "tuition_fee": str(program.tuition_fee) if program.tuition_fee is not None else "",
         "currency": program.currency or "",
         "source_url": program.source_url or "",
